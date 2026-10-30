@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>三目並べ 最強 AI （Minimax）</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+body { background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); min-height:100vh; }
+.cell {
+  width: 100px; height: 100px;
+  background: rgba(255,255,255,0.05);
+  border: 2px solid rgba(255,255,255,0.2);
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 3rem;
+}
+.cell:hover:not(.taken) { background: rgba(255,255,255,0.12); transform: scale(1.05); }
+.cell.taken { cursor: default; }
+.cell.X { color: #60a5fa; text-shadow: 0 0 20px #3b82f6; }
+.cell.O { color: #f87171; text-shadow: 0 0 20px #ef4444; }
+.cell.win-cell { background: rgba(250,204,21,0.2); border-color: #fbbf24; animation: glow 0.8s infinite alternate; }
+@keyframes glow { from{box-shadow:0 0 8px #fbbf24;} to{box-shadow:0 0 24px #fbbf24;} }
+.cell.highlight { background: rgba(134,239,172,0.15); border-color: #86efac; }
+.tree-node { font-size: 11px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 4px 6px; display: inline-block; }
+.minimax-good { color: #4ade80; }
+.minimax-bad { color: #f87171; }
+.minimax-neutral { color: #fbbf24; }
+</style>
+</head>
+<body class="min-h-screen text-white font-sans p-4">
+<div class="max-w-2xl mx-auto">
+  <h1 class="text-3xl font-bold text-center mb-1 text-yellow-400">⭕ 三目並べ 最強AI ❌</h1>
+  <p class="text-center text-gray-400 text-sm mb-4">Minimax アルゴリズム</p>
+
+  <!-- Stats -->
+  <div class="bg-gray-800 bg-opacity-60 rounded-xl p-3 mb-4 grid grid-cols-3 gap-2 text-center text-sm">
+    <div><div class="text-blue-400 font-bold text-xl" id="pWin">0</div><div class="text-gray-400">あなたの勝利</div></div>
+    <div><div class="text-gray-400 font-bold text-xl" id="draws">0</div><div class="text-gray-400">引き分け</div></div>
+    <div><div class="text-red-400 font-bold text-xl" id="aiWin">0</div><div class="text-gray-400">AIの勝利</div></div>
+  </div>
+
+  <!-- Settings -->
+  <div class="bg-gray-800 bg-opacity-60 rounded-xl p-3 mb-4 flex flex-wrap gap-4 items-center justify-between">
+    <div class="flex items-center gap-3">
+      <label class="text-sm text-gray-400">難易度:</label>
+      <div class="flex gap-2">
+        <button onclick="setDiff('easy')" id="diffEasy" class="px-3 py-1 rounded-lg text-sm font-bold bg-green-700 hover:bg-green-600 text-white" aria-label="簡単">簡単</button>
+        <button onclick="setDiff('medium')" id="diffMedium" class="px-3 py-1 rounded-lg text-sm font-bold bg-yellow-700 hover:bg-yellow-600 text-white" aria-label="普通">普通</button>
+        <button onclick="setDiff('hard')" id="diffHard" class="px-3 py-1 rounded-lg text-sm font-bold bg-red-700 hover:bg-red-600 text-white border-2 border-white" aria-label="最強">最強</button>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <label class="text-sm text-gray-400">先手:</label>
+      <div class="flex gap-2">
+        <button onclick="setFirst('player')" id="firstPlayer" class="px-3 py-1 rounded-lg text-sm font-bold bg-blue-700 text-white border-2 border-white" aria-label="あなた先手">あなた</button>
+        <button onclick="setFirst('ai')" id="firstAI" class="px-3 py-1 rounded-lg text-sm font-bold bg-gray-600 text-white" aria-label="AI先手">AI</button>
+      </div>
+    </div>
+    <label class="flex items-center gap-2 text-sm cursor-pointer">
+      <input type="checkbox" id="demoMode" class="w-4 h-4" onchange="toggleDemo()" aria-label="デモモード">
+      <span class="text-gray-400">Minimaxデモ</span>
+    </label>
+  </div>
+
+  <!-- Status -->
+  <div id="statusMsg" class="text-center text-xl font-bold py-2 mb-3 text-yellow-300">あなたの番 (X)</div>
+
+  <!-- Board -->
+  <div class="flex justify-center mb-4">
+    <div class="grid grid-cols-3 gap-3" id="board" role="grid" aria-label="三目並べのボード">
+      <!-- 9 cells -->
+    </div>
+  </div>
+
+  <div class="flex justify-center mb-4">
+    <button onclick="resetGame()" class="bg-purple-700 hover:bg-purple-600 text-white font-bold px-8 py-3 rounded-xl" aria-label="リセット">🔄 新しいゲーム</button>
+  </div>
+
+  <!-- Minimax Demo Panel -->
+  <div id="demoPanel" class="hidden bg-gray-800 bg-opacity-60 rounded-xl p-3">
+    <div class="text-sm font-bold text-yellow-400 mb-2">🧠 Minimax 探索デモ</div>
+    <div class="text-xs text-gray-400 mb-2">AIが各手を評価したスコア（正=AI有利、負=プレイヤー有利）</div>
+    <div id="demoContent" class="flex flex-wrap gap-2"></div>
+  </div>
+</div>
+
+<script>
+let board = Array(9).fill(null);
+let currentPlayer = 'X'; // X=player, O=AI
+let gameActive = true;
+let difficulty = 'hard';
+let playerFirst = true;
+let stats = {pWin:0, aiWin:0, draws:0};
+let demoMode = false;
+
+const WIN_LINES = [
+  [0,1,2],[3,4,5],[6,7,8],
+  [0,3,6],[1,4,7],[2,5,8],
+  [0,4,8],[2,4,6]
+];
+
+function checkWinner(b){
+  for(const [a,c,d] of WIN_LINES){
+    if(b[a] && b[a]===b[c] && b[a]===b[d]) return {winner:b[a], line:[a,c,d]};
+  }
+  if(b.every(c=>c!==null)) return {winner:'draw'};
+  return null;
+}
+
+function minimax(b, depth, isMax, alpha, beta){
+  const res = checkWinner(b);
+  if(res){
+    if(res.winner==='O') return 10 - depth;
+    if(res.winner==='X') return depth - 10;
+    return 0;
+  }
+  if(isMax){
+    let best = -Infinity;
+    for(let i=0;i<9;i++){
+      if(!b[i]){
+        b[i]='O';
+        best = Math.max(best, minimax(b, depth+1, false, alpha, beta));
+        b[i]=null;
+        alpha = Math.max(alpha, best);
+        if(beta<=alpha) break;
+      }
+    }
+    return best;
+  } else {
+    let best = Infinity;
+    for(let i=0;i<9;i++){
+      if(!b[i]){
+        b[i]='X';
+        best = Math.min(best, minimax(b, depth+1, true, alpha, beta));
+        b[i]=null;
+        beta = Math.min(beta, best);
+        if(beta<=alpha) break;
+      }
+    }
+    return best;
+  }
+}
+
+function getBestMove(){
+  let bestScore = -Infinity;
+  let bestMove = -1;
+  const scores = {};
+  for(let i=0;i<9;i++){
+    if(!board[i]){
+      board[i]='O';
+      const s = minimax(board, 0, false, -Infinity, Infinity);
+      board[i]=null;
+      scores[i] = s;
+      if(s > bestScore){ bestScore=s; bestMove=i; }
+    }
+  }
+  if(demoMode) showDemoScores(scores);
+  return bestMove;
+}
+
+function showDemoScores(scores){
+  const dc = document.getElementById('demoContent');
+  dc.innerHTML = '';
+  for(let i=0;i<9;i++){
+    if(scores[i]===undefined) continue;
+    const s = scores[i];
+    const cls = s>0 ? 'minimax-good' : s<0 ? 'minimax-bad' : 'minimax-neutral';
+    const node = document.createElement('div');
+    node.className = 'tree-node ' + cls;
+    node.textContent = `マス${i+1}: ${s>0?'+':''}${s}`;
+    dc.appendChild(node);
+  }
+}
+
+function aiMove(){
+  if(!gameActive) return;
+  let move;
+  if(difficulty==='easy'){
+    const empty = board.map((v,i)=>v===null?i:-1).filter(i=>i>=0);
+    if(Math.random()<0.5) move = getBestMove();
+    else move = empty[Math.floor(Math.random()*empty.length)];
+  } else if(difficulty==='medium'){
+    const best = getBestMove();
+    const empty = board.map((v,i)=>v===null?i:-1).filter(i=>i>=0);
+    move = Math.random()<0.75 ? best : empty[Math.floor(Math.random()*empty.length)];
+  } else {
+    move = getBestMove();
+  }
+  if(move===undefined||move<0) return;
+  board[move]='O';
+  renderBoard();
+  const res = checkWinner(board);
+  if(res) endGame(res);
+  else { currentPlayer='X'; updateStatus(); }
+}
+
+function handleClick(idx){
+  if(!gameActive || board[idx] || currentPlayer!=='X') return;
+  board[idx]='X';
+  renderBoard();
+  const res = checkWinner(board);
+  if(res){ endGame(res); return; }
+  currentPlayer='O';
+  updateStatus();
+  setTimeout(aiMove, 300);
+}
+
+function renderBoard(){
+  const cells = document.querySelectorAll('.cell');
+  cells.forEach((cell,i)=>{
+    const v = board[i];
+    cell.textContent = v || '';
+    cell.className = 'cell' + (v ? ' taken ' + v : '');
+  });
+}
+
+function endGame(res){
+  gameActive = false;
+  let msg = '';
+  if(res.winner==='draw'){
+    msg='引き分け！'; stats.draws++;
+    document.getElementById('draws').textContent=stats.draws;
+  } else if(res.winner==='X'){
+    msg='🎉 あなたの勝利！'; stats.pWin++;
+    document.getElementById('pWin').textContent=stats.pWin;
+    highlightWin(res.line);
+  } else {
+    msg='🤖 AIの勝利！'; stats.aiWin++;
+    document.getElementById('aiWin').textContent=stats.aiWin;
+    highlightWin(res.line);
+  }
+  document.getElementById('statusMsg').textContent=msg;
+  document.getElementById('statusMsg').className='text-center text-xl font-bold py-2 mb-3 text-yellow-400';
+  saveStats();
+}
+
+function highlightWin(line){
+  const cells = document.querySelectorAll('.cell');
+  line.forEach(i=>cells[i].classList.add('win-cell'));
+}
+
+function updateStatus(){
+  if(!gameActive) return;
+  if(currentPlayer==='X') document.getElementById('statusMsg').textContent='あなたの番 (X)';
+  else document.getElementById('statusMsg').textContent='AIが考えています... (O)';
+}
+
+function buildBoard(){
+  const boardEl = document.getElementById('board');
+  boardEl.innerHTML='';
+  for(let i=0;i<9;i++){
+    const cell = document.createElement('div');
+    cell.className='cell';
+    cell.setAttribute('role','gridcell');
+    cell.setAttribute('aria-label','マス'+(i+1));
+    cell.setAttribute('tabindex','0');
+    cell.onclick=()=>handleClick(i);
+    cell.onkeydown=(e)=>{ if(e.key==='Enter'||e.key===' ') handleClick(i); };
+    boardEl.appendChild(cell);
+  }
+}
+
+function resetGame(){
+  board=Array(9).fill(null);
+  gameActive=true;
+  buildBoard();
+  if(playerFirst){ currentPlayer='X'; updateStatus(); }
+  else { currentPlayer='O'; updateStatus(); setTimeout(aiMove,500); }
+  document.getElementById('demoContent').innerHTML='';
+}
+
+function setDiff(d){
+  difficulty=d;
+  document.getElementById('diffEasy').className='px-3 py-1 rounded-lg text-sm font-bold bg-green-700 hover:bg-green-600 text-white'+(d==='easy'?' border-2 border-white':'');
+  document.getElementById('diffMedium').className='px-3 py-1 rounded-lg text-sm font-bold bg-yellow-700 hover:bg-yellow-600 text-white'+(d==='medium'?' border-2 border-white':'');
+  document.getElementById('diffHard').className='px-3 py-1 rounded-lg text-sm font-bold bg-red-700 hover:bg-red-600 text-white'+(d==='hard'?' border-2 border-white':'');
+  resetGame();
+}
+
+function setFirst(who){
+  playerFirst = who==='player';
+  document.getElementById('firstPlayer').className='px-3 py-1 rounded-lg text-sm font-bold bg-blue-700 text-white'+(playerFirst?' border-2 border-white':'');
+  document.getElementById('firstAI').className='px-3 py-1 rounded-lg text-sm font-bold bg-gray-600 text-white'+(!playerFirst?' border-2 border-white':'');
+  resetGame();
+}
+
+function toggleDemo(){
+  demoMode = document.getElementById('demoMode').checked;
+  document.getElementById('demoPanel').classList.toggle('hidden', !demoMode);
+}
+
+function saveStats(){
+  try{ localStorage.setItem('ttt_stats', JSON.stringify(stats)); }catch(e){}
+}
+function loadStats(){
+  try{
+    const s=JSON.parse(localStorage.getItem('ttt_stats')||'{}');
+    stats.pWin=s.pWin||0; stats.aiWin=s.aiWin||0; stats.draws=s.draws||0;
+    document.getElementById('pWin').textContent=stats.pWin;
+    document.getElementById('aiWin').textContent=stats.aiWin;
+    document.getElementById('draws').textContent=stats.draws;
+  }catch(e){}
+}
+
+loadStats();
+buildBoard();
+resetGame();
+</script>
+</body>
+</html>
